@@ -1,0 +1,114 @@
+% CALCULATEMEASURESREPETITION - calculate some MEP measures for a repetition (i.e. single stimulation location)
+% each repetition has multiple blocks
+% each block has multiple trials
+
+function [measuresByTrial,measuresByBlock] = calculateMeasuresRepetition(subject,repetition,channels)
+
+measuresByTrial = [];
+measuresByBlock = [];
+
+data=loaddata(['results/' subject '/' repetition]);
+if exist(['results/' subject '/' repetition '.csv'],'file')
+    trialsTable = readtable(['results/' subject '/' repetition '.csv']);
+else
+    trialsTable = data.blockdescriptions;
+end
+
+if exist(['results/' subject '/' repetition '_touse.csv'],'file')
+    toUseTable = readtable(['results/' subject '/' repetition '_touse.csv']);
+else
+    toUseTable = table;
+    N = size(data.e,2);
+    toUseTable.trial = (1:N)';
+    toUseTable.toUse_1 = ones(N,1);
+    toUseTable.toUse_2 = ones(N,1);
+    toUseTable.isMEP = ones(N,1);
+    toUseTable.latencyOnset_1 = -1 * ones(N,1); %-1 indicates has not been set (yet)
+    toUseTable.latencyOnset_2 = -1 * ones(N,1); %-1 indicates has not been set (yet)
+    toUseTable.endpoint_1 = -1 * ones(N,1);
+    toUseTable.endpoint_2 = -1 * ones(N,1);
+    params = globalparameters;
+    toUseTable.baselineStart = ((params.baseline_start-1000)./data.samplerate) * 1000 * ones(N,1);
+    toUseTable.baselineEnd = params.baseline_length * ones(N,1) + toUseTable.baselineStart;
+    toUseTable.lambda = 3 * ones(N,1);
+end
+
+params = globalparameters;
+params.samplerate = data.samplerate;
+
+% Go through every block and trial
+count = 0;
+count2 = 0;
+numblocks = size(trialsTable,1);
+alldata = data.alldata.data;
+
+for blockNum=1:numblocks
+    blockstart = trialsTable.blockstart(blockNum);
+    blockend = trialsTable.blockend(blockNum);
+    thisblock = data.block{blockNum};
+    touseBlock_1 = toUseTable.toUse_1(blockstart:blockend);
+    touseBlock_2 = toUseTable.toUse_2(blockstart:blockend);
+    params.std = trialsTable.n_std(blockNum);
+
+    for k=blockstart:blockend
+        thisdata = data.e(:,:,k);
+        touse_1 = toUseTable.toUse_1(k);
+        touse_2 = toUseTable.toUse_2(k);
+        latency_ms_1 = toUseTable.latencyOnset_1(k);
+        latency_ms_2 = toUseTable.latencyOnset_2(k);
+        endpoint_ms_1 = toUseTable.endpoint_1(k);
+        endpoint_ms_2 = toUseTable.endpoint_1(k);
+
+        baseline_start = toUseTable.baselineStart(k);
+        baseline_end = toUseTable.baselineEnd(k);
+        isMEP = toUseTable.isMEP(k);
+        thisresult = calculateMeasuresTrial(thisdata,alldata,thisblock,params,[touse_1 touse_2],...
+            channels,isMEP,[latency_ms_1 latency_ms_2],[endpoint_ms_1 endpoint_ms_2],baseline_start,baseline_end);
+        count = count+1;
+        results.block(count,1) = blockNum;
+        results.repetition(count,1) = k;
+        f = fields(thisresult);
+        for m=1:numel(f)
+            for c=1:2
+                results.(f{m})(count,c) = thisresult.(f{m})(c);
+            end
+        end
+    end
+
+    thisresultBlock = calculateMeasuresBlock(thisblock,params,[touseBlock_1 touseBlock_2],channels);
+    if (isempty(thisresultBlock))
+        return
+    end
+    count2 = count2+1;
+    results2.block(count2,1) = blockNum;
+    f = fields(thisresultBlock);
+    for m=1:numel(f)
+
+        if isscalar(thisresultBlock.(f{m}))  && ~strcmp(f{m},'PeakToPeak_individual') && ~strcmp(f{m},'toUse')
+           results2.(f{m})(count2,1) = thisresultBlock.(f{m});
+        elseif all(size(thisresultBlock.(f{m}))==[1 2])
+            if length(size(results2.(f{m}))) == 1
+            results2.(f{m})(count2,:) = thisresultBlock.(f{m});
+        end
+
+    end
+end
+
+results2.machine_setting = trialsTable.machine_setting;
+results2.percent_threshold = trialsTable.percent_threshold;
+
+measuresByTrial = struct2table(results);
+measuresByBlock = struct2table(results2);
+
+% Add some mean measures to measuresByBlock
+trialMeanMeasures = {'latency_semi_manual_ms'};%,'latencyJose_ms'};
+
+blocks = measuresByBlock.block;
+for k=1:numel(blocks)
+    block = blocks(k);
+    trials = find(measuresByTrial.block==block);
+    for n=1:numel(trialMeanMeasures)
+        measuresByBlock.([trialMeanMeasures{n} '_trialMean'])(k,:) = nanmean(measuresByTrial.(trialMeanMeasures{n})(trials,:));
+    end
+end
+

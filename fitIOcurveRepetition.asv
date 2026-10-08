@@ -1,0 +1,23 @@
+function [result,percent_threshold,logMEPsMEP0,r2] = fitIOcurveRepetition(subject,repetition,channels,toplot)
+
+if nargin<4 || isempty(toplot)
+    toplot = 0;
+end
+
+[~,measures] = calculateMeasuresRepetition(subject,repetition,channels);
+
+for c=1:2
+    MEPs = measures.PeakToPeak_mean(:,c);
+    MEP0 = measures.PeakToPeakBaseline(:,c);
+    percent_threshold = measures.percent_threshold;
+
+    good = find(~isnan(MEPs) & ~isnan(MEP0) & ~isnan(percent_threshold));
+    MEPs = MEPs(good);
+    MEP0 = MEP0(good);
+    percent_threshold = percent_threshold(good);
+
+    [result(c,:),logMEPsMEP0(c),r2(c)] = fitIOcurve(percent_threshold,MEPs,MEP0,toplot);
+
+    [percent_threshold(c),order(c)] = sort(percent_threshold);
+    logMEPsMEP0(c) = logMEPsMEP0(order(c));
+end
